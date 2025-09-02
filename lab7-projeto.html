@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="pt-BR" style="height:100%">
+<head>
+  <meta charset="utf-8" />
+  <title>Volume na balança comercial do Brasil</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html,body { height:100%; margin:0; padding:0; }
+    #mapa { height: 66%; }   /* 2x maior */
+    #linha { height: 34%; border-top: 2px solid #ccc; }
+    #controls {
+      position:absolute;
+      top:10px;
+      right:10px;
+      background:rgba(255,255,255,0.9);
+      padding:8px 12px;
+      border-radius:6px;
+      font-family: Arial, sans-serif;
+      font-size:14px;
+      z-index:1000;
+    }
+  </style>
+</head>
+<body>
+  <!-- seletor para o mapa -->
+  <div id="controls">
+    <label for="tipo">Mostrar:</label>
+    <select id="tipo">
+      <option value="EXP">Exportações</option>
+      <option value="IMP">Importações</option>
+      <option value="BAL" selected>Balança Comercial</option>
+    </select>
+  </div>
+
+  <!-- containers dos dois gráficos -->
+  <div id="mapa"></div>
+  <div id="linha"></div>
+
+  <!-- dependências -->
+  <script src="https://echarts.apache.org/en/js/vendors/jquery@3.7.1/dist/jquery.min.js"></script>
+  <script src="https://fastly.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+
+  <script>
+  (function () {
+    var GEO_WORLD = 'world.json'; 
+    var DATA_FILE = 'BR-exportacoes_importacoes_2025.json'; 
+    var anoAtual = '2025'; // inicial
+    var tipoAtual = 'BAL';
+    var dados = null;
+
+    var chartMapa = echarts.init(document.getElementById('mapa'));
+    var chartLinha = echarts.init(document.getElementById('linha'));
+
+    function formatBillion(value) {
+      if (value == null || isNaN(value)) return null;
+      return (value / 1e9).toFixed(1);
+    }
+
+    // -------- MAPA --------
+    function carregarSerieMapa(tipo, ano) {
+      if (!dados || !dados[tipo] || !dados[tipo][ano]) return [];
+      return dados[tipo][ano].map(function (it) {
+        return {
+          name: it.name,
+          value: (typeof it.us_value === 'number') ? it.us_value : null
+        };
+      });
+    }
+
+    function atualizarMapa(tipo, ano) {
+      var serie = carregarSerieMapa(tipo, ano);
+      var valores = serie.map(d => d.value).filter(v => v != null);
+      var maxVal = valores.length ? Math.max.apply(null, valores) : 1;
+      var minVal = valores.length ? Math.min.apply(null, valores) : 0;
+
+      var option = {
+        title: [
+          {
+            text: 'Volume na balança comercial do Brasil (' + ano + ')',
+            subtext: 'Dados do monitor do comércio exterior brasileiro',
+            left: 'center'
+          }
+        ],
+        tooltip: {
+          trigger: 'item',
+          formatter: function (params) {
+            if (!params.data || params.value == null) {
+              return params.name + '<br/>Sem dados';
+            }
+            return '<strong>' + params.name + '</strong><br/>US$ ' + formatBillion(params.value) + ' bi';
+          }
+        },
+        visualMap: {
+          type: 'continuous',
+          min: minVal,
+          max: maxVal,
+          left: 'right',
+          top: 'center',
+          text: ['Maior', 'Menor'],
+          calculable: true,
+          inRange: {
+            color: ['#f7fbff','#deebf7','#c6dbef','#9ecae1','#6baed6','#4292c6','#2171b5','#08519c','#08306b']
+          },
+          formatter: function (value) { return formatBillion(value) + ' bi'; }
+        },
+        series: [
+          {
+            name: 'US$',
+            type: 'map',
+            map: 'world',
+            roam: true,
+            emphasis: { label: { show: true } },
+            data: serie
+          }
+        ]
+      };
+      chartMapa.setOption(option, true);
+    }
+
+    // -------- LINHA --------
+    function coletarSerieLinha(tipo, anos) {
+      return anos.map(function (ano) {
+        var lista = dados[tipo][ano] || [];
+        var total = lista.reduce(function (acc, it) {
+          return acc + (it.us_value || 0);
+        }, 0);
+        return formatBillion(total);
+      });
+    }
+
+    function atualizarLinha() {
+  var anos = Object.keys(dados.EXP).sort();
+  var serieEXP = coletarSerieLinha('EXP', anos);
+  var serieIMP = coletarSerieLinha('IMP', anos);
+  var serieBAL = coletarSerieLinha('BAL', anos);
+
+  var option = {
+      color: ['#2ca02c', '#d62728', '#1f77b4'],
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'line' },
+        formatter: function (params) {
+          var html = '<strong>Ano: ' + params[0].axisValue + '</strong><br/>';
+          params.forEach(function (p) {
+            if (p.data != null) {
+              html += p.marker + ' ' + p.seriesName + ': ' + p.data + ' bi US$<br/>';
+            }
+          });
+          return html;
+        }
+      },
+      legend: { data: ['Exportações', 'Importações', 'Balança Comercial'] },
+      grid: { top: 60, bottom: 60, left: 70, right: 20 },
+      xAxis: {
+        type: 'category',
+        boundaryGap: false,
+        data: anos,
+        axisPointer: { show: true, type: 'line' }
+      },
+      yAxis: {
+        type: 'value',
+        name: 'US$ bilhões',
+        axisLabel: { formatter: function (val) { return val + ' bi'; } }
+      },
+      dataZoom: [
+        {
+          type: 'inside',
+          start: 0,
+          end: 100
+        },
+        {
+          start: 0,
+          end: 10
+        }
+      ],
+      series: [
+        { name: 'Exportações', type: 'line', smooth: true, data: serieEXP },
+        { name: 'Importações', type: 'line', smooth: true, data: serieIMP },
+        { name: 'Balança Comercial', type: 'line', smooth: true, data: serieBAL }
+      ]
+    };
+
+    chartLinha.setOption(option);
+
+    // sincronizar hover -> mapa
+    chartLinha.on('updateAxisPointer', function (event) {
+        var xAxisInfo = event.axesInfo && event.axesInfo[0];
+        if (!xAxisInfo) return;
+
+        var pointIndex = xAxisInfo.value; // pode ser índice ou categoria
+        var anos = Object.keys(dados.EXP).sort();
+        var anoHover = anos[pointIndex]; // garantir que é a categoria correta
+
+        if (anoHover && dados.EXP[anoHover]) {
+          anoAtual = anoHover;
+          atualizarMapa(tipoAtual, anoAtual);
+        }
+    });
+  }
+
+    // -------- CARREGAMENTO --------
+    chartMapa.showLoading();
+    chartLinha.showLoading();
+
+    $.when($.get(GEO_WORLD), $.getJSON(DATA_FILE))
+      .done(function (resWorld, resData) {
+        var worldJson = resWorld[0];
+        dados = resData[0] || resData;
+
+        echarts.registerMap('world', worldJson);
+
+        chartMapa.hideLoading();
+        chartLinha.hideLoading();
+
+        atualizarMapa(tipoAtual, anoAtual); // inicial
+        atualizarLinha();
+
+        // seletor tipo
+        document.getElementById('tipo').addEventListener('change', function (e) {
+          tipoAtual = e.target.value;
+          atualizarMapa(tipoAtual, anoAtual);
+        });
+      })
+      .fail(function () {
+        chartMapa.hideLoading();
+        chartLinha.hideLoading();
+        alert('Erro ao carregar world.json ou dados.');
+      });
+
+    window.addEventListener('resize', function () {
+      chartMapa.resize();
+      chartLinha.resize();
+    });
+  })();
+  </script>
+</body>
+</html>
